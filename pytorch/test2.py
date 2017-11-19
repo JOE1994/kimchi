@@ -179,12 +179,11 @@ if __name__ == "__main__":
     # meta_data = meta_data.iloc[np.arange(500)]  # Remove this!!!
     # Dataset and loader
     train_dataset = CdiscountDataset(TRAIN_BSON_FILE, meta_data, transf.ToTensor())
-    loader = data_utils.DataLoader(train_dataset, batch_size=BS, num_workers=N_THREADS, shuffle=True)
+    loader = data_utils.DataLoader(train_dataset, batch_size=BS, num_workers=0, shuffle=True)
 
     # Let's go fetch some data!
 
     for epoch in range(EPOCH):
-        pbar = tqdm(total=len(loader))
         for i, (batch, target) in enumerate(loader):
             # Convert torch tensor to Variable
             images = Variable(batch.cuda())
@@ -197,9 +196,10 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
 
-            if i == len(train_dataset) // BS:
+            if i == 0:
                 print('Epoch [%d/%d], Step [%d/%d], Loss: %.4f'
                           % (epoch + 1, EPOCH, i + 1, (len(train_dataset) // BS) + 1, loss.data[0]))
+                pbar = tqdm(total=len(loader))
             pbar.update()
         pbar.close()
         '''# Test the Model
