@@ -35,6 +35,8 @@ def read_bson(bson_path, num_records, with_categories):
             item_length_bytes = f.read(4)
             if len(item_length_bytes) == 0:
                 break
+            if records_read == num_records:
+                break
 
             length = struct.unpack("<i", item_length_bytes)[0]
             f.seek(offset)
@@ -130,10 +132,10 @@ class Net(nn.Module):
             nn.MaxPool2d(2))
 
         self.layer3 = nn.Sequential(
-            nn.Linear(45*45*32, 4096),
-            nn.BatchNorm1d(4096),
+            nn.Linear(45*45*32, 1024),
+            nn.BatchNorm1d(1024),
             nn.ReLU(),
-            nn.Linear(4096, 5270),
+            nn.Linear(1024, 5270),
             nn.LogSoftmax())
 
     def forward(self, x):
@@ -163,15 +165,16 @@ if __name__ == "__main__":
     TRAIN_BSON_FILE = 'C:/test/train.bson'
     CATEGS = 'D:/Download/category_names.csv'
     # Chenge this weh running on your machine
-    N_TRAIN = 7069896 // 180
-    BS = 32
-    N_THREADS = 12
+    N_TRAIN = 7069896
+    R_TRAIN = 65536
+    BS = 128
+    N_THREADS = 1
     EPOCH = 20
 
     # mapping the catigores into 0-5269 range
     cat2idx, idx2cat = make_category_tables(CATEGS)
     # Scanning the metadata
-    meta_data = read_bson(TRAIN_BSON_FILE, N_TRAIN, with_categories=True)
+    meta_data = read_bson(TRAIN_BSON_FILE, R_TRAIN, with_categories=True)
     meta_data.category_id = np.array([cat2idx[ind] for ind in meta_data.category_id])
     # meta_data = meta_data.iloc[np.arange(500)]  # Remove this!!!
     # Dataset and loader
@@ -179,8 +182,9 @@ if __name__ == "__main__":
     loader = data_utils.DataLoader(train_dataset, batch_size=BS, num_workers=N_THREADS, shuffle=True)
 
     # Let's go fetch some data!
-    pbar = tqdm(total=len(loader))
+
     for epoch in range(EPOCH):
+        pbar = tqdm(total=len(loader))
         for i, (batch, target) in enumerate(loader):
             # Convert torch tensor to Variable
             images = Variable(batch.cuda())
@@ -193,10 +197,11 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
 
-            if (i + 1) % 100 == 0:
+            if i == len(train_dataset) // BS:
                 print('Epoch [%d/%d], Step [%d/%d], Loss: %.4f'
                           % (epoch + 1, EPOCH, i + 1, (len(train_dataset) // BS) + 1, loss.data[0]))
             pbar.update()
+        pbar.close()
         '''# Test the Model
         correct = 0
         total = 0
@@ -211,4 +216,4 @@ if __name__ == "__main__":
 
     # Save the Model
     torch.save(net.state_dict(), 'model.pkl')'''
-    pbar.close()
+
