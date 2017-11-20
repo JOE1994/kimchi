@@ -23,13 +23,14 @@ import torchvision.datasets as dsets
 import torchvision.transforms as transforms
 from torch.autograd import Variable
 
-def read_bson(bson_path, num_records, with_categories):
+def read_bson(bson_path, num_records, with_categories, global_offset):
     """
     Reads BSON
     """
+    offset = global_offset
     rows = {}
     with open(bson_path, "rb") as f, tqdm(total=num_records) as pbar:
-        offset = 0
+        f.seek(offset)
         records_read = 0
         while True:
             item_length_bytes = f.read(4)
@@ -65,7 +66,7 @@ def read_bson(bson_path, num_records, with_categories):
     df.index.name = "product_id"
     df.columns = columns
     df.sort_index(inplace=True)
-    return df
+    return df,offset
 
 
 def make_category_tables(categories_path):
@@ -120,23 +121,58 @@ class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
         self.layer1 = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=5, padding=2),
-            nn.BatchNorm2d(16),
+            nn.Conv2d(3, 8, kernel_size=3, padding=1),
+            nn.BatchNorm2d(8),
+            nn.MaxPool2d(2),
             nn.ReLU(),
-            nn.MaxPool2d(2))
+            nn.Conv2d(8, 16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16),
+            nn.MaxPool2d(2),
+            nn.ReLU(),)
 
-        self.layer2 = nn.Sequential(
-            nn.Conv2d(16, 32, kernel_size=3, padding=1),
+        self.layer2_1 = nn.Sequential(
+            nn.Conv2d(16, 32, kernel_size=3, padding=2),
             # nn.BatchNorm2d(16),
             nn.ReLU(),
-            nn.MaxPool2d(2))
+            nn.Conv2d(32, 128, kernel_size=4, stride=4),
+            nn.ReLU())
+
+        self.layer2_2 = nn.Sequential(
+            nn.Conv2d(16, 32, kernel_size=3, padding=2),
+            # nn.BatchNorm2d(16),
+            nn.MaxPool2d(2),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            # nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=2, stride=2),
+            nn.ReLU())
+
+        self.layer2_3 = nn.Sequential(
+            nn.Conv2d(16, 32, kernel_size=3, padding=2),
+            # nn.BatchNorm2d(16),
+            nn.MaxPool2d(2),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            # nn.BatchNorm2d(16),
+            nn.MaxPool2d(2),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            # nn.BatchNorm2d(16),
+            nn.ReLU(),
+        )
 
         self.layer3 = nn.Sequential(
-            nn.Linear(45*45*32, 1024),
+            nn.Linear(23*23*128, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Linear(512, 5270))
+
+        self.fc = nn.Sequential(
+            nn.Linear(45 * 45 * 16, 1024),
             nn.BatchNorm1d(1024),
             nn.ReLU(),
-            nn.Linear(1024, 5270),
-            nn.LogSoftmax())
+            nn.Linear(1024, 5270))
 
     def forward(self, x):
         # h0 = Variable(torch.randn(2, x.size(0), 300).cuda())
@@ -145,10 +181,17 @@ class Net(nn.Module):
         # out, _ = self.lstm(x, (h0, c0))
         # out = self.layer3(out[:, -1, :])
 
-        out = self.layer1(x)
-        out = self.layer2(out)
+        '''out = self.layer1(x)
+        out_1 = self.layer2_1(out)
+        out_2 = self.layer2_2(out)
+        out_3 = self.layer2_3(out)
+        out = out_1 + out_2 + out_3
         out = out.view(out.size(0), -1)
-        out = self.layer3(out)
+        out = self.layer3(out)'''
+
+        out = self.layer1(x)
+        out = out.view(out.size(0), -1)
+        out = self.fc(out)
 
         return out
 
@@ -163,10 +206,12 @@ optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
 
 if __name__ == "__main__":
     TRAIN_BSON_FILE = 'C:/test/train.bson'
+    TEST_BSON_FILE = 'C:/test/test.bson'
     CATEGS = 'D:/Download/category_names.csv'
     # Chenge this weh running on your machine
     N_TRAIN = 7069896
     R_TRAIN = 65536
+    R_TEST = 1024
     BS = 128
     N_THREADS = 1
     EPOCH = 20
@@ -174,13 +219,19 @@ if __name__ == "__main__":
     # mapping the catigores into 0-5269 range
     cat2idx, idx2cat = make_category_tables(CATEGS)
     # Scanning the metadata
-    meta_data = read_bson(TRAIN_BSON_FILE, R_TRAIN, with_categories=True)
+    meta_data, go = read_bson(TRAIN_BSON_FILE, R_TRAIN, with_categories=True, global_offset=0)
     meta_data.category_id = np.array([cat2idx[ind] for ind in meta_data.category_id])
+
+    meta_data2, _ = read_bson(TRAIN_BSON_FILE, R_TEST, with_categories=True, global_offset=go)
+    meta_data2.category_id = np.array([cat2idx[ind] for ind in meta_data2.category_id])
+
     # meta_data = meta_data.iloc[np.arange(500)]  # Remove this!!!
     # Dataset and loader
     train_dataset = CdiscountDataset(TRAIN_BSON_FILE, meta_data, transf.ToTensor())
     loader = data_utils.DataLoader(train_dataset, batch_size=BS, num_workers=0, shuffle=True)
 
+    test_dataset = CdiscountDataset(TRAIN_BSON_FILE, meta_data2, transf.ToTensor())
+    test_loader = data_utils.DataLoader(test_dataset, batch_size=BS, num_workers=0, shuffle=False)
     # Let's go fetch some data!
 
     for epoch in range(EPOCH):
@@ -202,18 +253,20 @@ if __name__ == "__main__":
                 pbar = tqdm(total=len(loader))
             pbar.update()
         pbar.close()
-        '''# Test the Model
+
+        # Test the Model
+        net.eval()
         correct = 0
         total = 0
-        for images, labels in test_loader:
-            images = Variable(images).cuda()
+        for batch, target in test_loader:
+            images = Variable(batch).cuda()
             outputs = net(images)
             _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted.cpu() == labels).sum()
-
-        print('Accuracy of the network on the 10000 test images: %f %%' % (100.0 * correct / total))
+            total += target.size(0)
+            correct += (predicted.cpu() == target).sum()
+        net.train()
+        print('Accuracy of the network on the %d test images: %f %%' % (R_TEST, (100.0 * correct / total)))
 
     # Save the Model
-    torch.save(net.state_dict(), 'model.pkl')'''
+    torch.save(net.state_dict(), 'model.pkl')
 
