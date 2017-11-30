@@ -318,8 +318,8 @@ if __name__ == "__main__":
     print(both_ratio)
 
     train_dataset = CdiscountDataset(TRAIN_BSON_FILE, train_data, transf.Compose([
-        transf.ColorJitter(0.7, 0.7, 0.7, 0.7),
-        transf.RandomResizedCrop(180),
+        transf.Scale(200),
+        transf.RandomCrop(180),
         transf.RandomHorizontalFlip(),
         transf.ToTensor(),
         transf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -327,6 +327,8 @@ if __name__ == "__main__":
     loader = data_utils.DataLoader(train_dataset, batch_size=BS, shuffle=True)
 
     test_dataset = CdiscountDataset(TRAIN_BSON_FILE, test_data, transf.Compose([
+        transf.Scale(200),
+        transf.CenterCrop(180),
         transf.ToTensor(),
         transf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ]))
