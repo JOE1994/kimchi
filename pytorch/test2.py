@@ -25,22 +25,6 @@ import torchvision.transforms as transforms
 from torch.autograd import Variable
 
 
-def normalize(arr):
-    """
-    Linear normalization
-    http://en.wikipedia.org/wiki/Normalization_%28image_processing%29
-    """
-    arr = arr.astype('float')
-    # Do not touch the alpha channel
-    for i in range(3):
-        minval = arr[...,i].min()
-        maxval = arr[...,i].max()
-        if minval != maxval:
-            arr[...,i] -= minval
-            arr[...,i] *= (255.0/(maxval-minval))
-    return arr
-
-
 def read_bson(bson_path, with_categories):
     """
     Reads BSON
@@ -123,12 +107,10 @@ class CdiscountDataset(data_utils.Dataset):
         keep = np.random.choice(len(obs['imgs']))
         byte_str = obs['imgs'][keep]['picture']
         img = cv2.imdecode(np.fromstring(byte_str, dtype=np.uint8), cv2.IMREAD_COLOR)
-        norm_img = img
-        norm_img = cv2.normalize(img, norm_img, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-        # norm_img = Image.fromarray(cv2.cvtColor(norm_img, cv2.COLOR_BGR2RGB))
-        norm_img = self.transform(norm_img)
+        img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        img = self.transform(img)
 
-        return norm_img, target
+        return img, target
 
     def __len__(self):
         return self.metadata.index.values.shape[0]
@@ -302,7 +284,7 @@ if __name__ == "__main__":
     N_TRAIN = 7069896
     R_TRAIN = 256
     R_TEST = 1
-    BS = 64
+    BS = 256
     N_THREADS = 1
     EPOCH = 100
 
@@ -318,18 +300,37 @@ if __name__ == "__main__":
     temp = np.arange(N_TRAIN)
     np.random.shuffle(temp)
 
-    train_sample = temp[0:262144]
-    test_sample = temp[262144:262144+4096]
-
+    train_sample = temp[0:7000000]
+    test_sample = temp[7000000:7069896]
 
     train_data = meta_data.iloc[train_sample]
     test_data = meta_data.iloc[test_sample]
 
-    train_dataset = CdiscountDataset(TRAIN_BSON_FILE, train_data, transf.ToTensor())
-    loader = data_utils.DataLoader(train_dataset, batch_size=BS, num_workers=0, shuffle=True)
+    print(train_data)
 
-    test_dataset = CdiscountDataset(TRAIN_BSON_FILE, test_data, transf.ToTensor())
-    test_loader = data_utils.DataLoader(test_dataset, batch_size=1, num_workers=0, shuffle=False)
+    training_category = np.unique(np.array(train_data.category_id))
+    test_category = np.unique(np.array(test_data.category_id))
+
+    both = np.intersect1d(training_category, test_category)
+
+    both_ratio = 1.0 * len(both)/len(test_category)
+
+    print(both_ratio)
+
+    train_dataset = CdiscountDataset(TRAIN_BSON_FILE, train_data, transf.Compose([
+        transf.ColorJitter(0.7, 0.7, 0.7, 0.7),
+        transf.RandomResizedCrop(180),
+        transf.RandomHorizontalFlip(),
+        transf.ToTensor(),
+        transf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ]))
+    loader = data_utils.DataLoader(train_dataset, batch_size=BS, shuffle=True)
+
+    test_dataset = CdiscountDataset(TRAIN_BSON_FILE, test_data, transf.Compose([
+        transf.ToTensor(),
+        transf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ]))
+    test_loader = data_utils.DataLoader(test_dataset, batch_size=1, shuffle=False)
     # Let's go fetch some data!
 
     for epoch in range(EPOCH):
