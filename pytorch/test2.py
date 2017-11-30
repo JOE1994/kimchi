@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 import bson
 import cv2
+import random
 from tqdm import tqdm
 import struct
 from PIL import Image
@@ -23,20 +24,35 @@ import torchvision.datasets as dsets
 import torchvision.transforms as transforms
 from torch.autograd import Variable
 
-def read_bson(bson_path, num_records, with_categories, global_offset):
+
+def normalize(arr):
+    """
+    Linear normalization
+    http://en.wikipedia.org/wiki/Normalization_%28image_processing%29
+    """
+    arr = arr.astype('float')
+    # Do not touch the alpha channel
+    for i in range(3):
+        minval = arr[...,i].min()
+        maxval = arr[...,i].max()
+        if minval != maxval:
+            arr[...,i] -= minval
+            arr[...,i] *= (255.0/(maxval-minval))
+    return arr
+
+
+def read_bson(bson_path, with_categories):
     """
     Reads BSON
     """
-    offset = global_offset
+    offset = 0
     rows = {}
-    with open(bson_path, "rb") as f:
+    with open(bson_path, "rb") as f, tqdm(total=7069896) as pbar:
         f.seek(offset)
         records_read = 0
         while True:
             item_length_bytes = f.read(4)
             if len(item_length_bytes) == 0:
-                break
-            if records_read == num_records:
                 break
 
             length = struct.unpack("<i", item_length_bytes)[0]
@@ -56,6 +72,8 @@ def read_bson(bson_path, num_records, with_categories, global_offset):
             offset += length
             f.seek(offset)
             records_read += 1
+            pbar.update()
+        pbar.close()
     columns = ["num_imgs", "offset", "length"]
     if with_categories:
         columns += ["category_id"]
@@ -64,7 +82,7 @@ def read_bson(bson_path, num_records, with_categories, global_offset):
     df.index.name = "product_id"
     df.columns = columns
     df.sort_index(inplace=True)
-    return df,offset
+    return df
 
 
 def make_category_tables(categories_path):
@@ -105,11 +123,12 @@ class CdiscountDataset(data_utils.Dataset):
         keep = np.random.choice(len(obs['imgs']))
         byte_str = obs['imgs'][keep]['picture']
         img = cv2.imdecode(np.fromstring(byte_str, dtype=np.uint8), cv2.IMREAD_COLOR)
+        norm_img = img
+        norm_img = cv2.normalize(img, norm_img, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+        # norm_img = Image.fromarray(cv2.cvtColor(norm_img, cv2.COLOR_BGR2RGB))
+        norm_img = self.transform(norm_img)
 
-        img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        img = self.transform(img)
-
-        return img, target
+        return norm_img, target
 
     def __len__(self):
         return self.metadata.index.values.shape[0]
@@ -172,33 +191,54 @@ class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
         self.layer1 = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, padding=1),
+            nn.Conv2d(3, 32, kernel_size=3, padding=1, stride=2),
             nn.BatchNorm2d(32),
-            nn.MaxPool2d(2, stride=2),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
-            nn.MaxPool2d(2, stride=2),
+            nn.ReLU(),
         )
 
-        self.layer2 = self.residual(64, 192, 3)
+        self.layer2 = self.residual(64, 128, 3)
+        self.layer3 = self.residual(128, 256, 3)
+        self.layer4 = self.residual(256, 728, 3)
+        self.layer5 = self.residual2(728)
+        self.layer6 = self.residual2(728)
+        self.layer7 = self.residual2(728)
+        self.layer8 = self.residual2(728)
+        self.layer9 = self.residual2(728)
+        self.layer10 = self.residual2(728)
+        self.layer11 = self.residual2(728)
+        self.layer12 = self.residual2(728)
+        self.layer13 = self.residual(728, 1024, 3)
 
-        self.layer3 = self.residual2(192)
-
-        self.layer5 = nn.Sequential(
-            nn.Conv2d(192, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512),
+        self.layer14 = nn.Sequential(
+            nn.Conv2d(1024, 1536, kernel_size=3, padding=1),
+            nn.BatchNorm2d(1536),
             nn.ReLU(),
-            nn.AvgPool2d(22)
+            nn.Conv2d(1536, 2048, kernel_size=3, padding=1),
+            nn.BatchNorm2d(2048),
+            nn.ReLU(),
+            nn.AvgPool2d(6)
         )
 
         self.fc = nn.Sequential(
-            nn.Dropout(inplace=True),
-            nn.Linear(512, 1024),
-            nn.ReLU(inplace=True),
-            nn.Linear(1024, 1024),
-            nn.ReLU(inplace=True),
-            nn.Linear(1024, 5270),)
+            nn.Dropout(),
+            nn.Linear(2048, 5270),)
+
+        self.test = nn.Sequential(
+            nn.Conv2d(3, 8, kernel_size=3, padding=1, stride=2),
+            nn.BatchNorm2d(8),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(8, 16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Linear(50*50*16, 1024),
+            nn.ReLU(),
+            nn.Linear(1024,5270),
+        )
 
     def residual(self, ind, outd, pooling):
         layers = []
@@ -228,7 +268,17 @@ class Net(nn.Module):
         out = self.layer1(x)
         out = self.layer2(out)
         out = self.layer3(out)
+        out = self.layer4(out)
         out = self.layer5(out)
+        out = self.layer6(out)
+        out = self.layer7(out)
+        out = self.layer8(out)
+        out = self.layer9(out)
+        out = self.layer10(out)
+        out = self.layer11(out)
+        out = self.layer12(out)
+        out = self.layer13(out)
+        out = self.layer14(out)
         out = out.view(out.size(0), -1)
         out = self.fc(out)
 
@@ -250,7 +300,7 @@ if __name__ == "__main__":
     CATEGS = 'D:/Download/category_names.csv'
     # Chenge this weh running on your machine
     N_TRAIN = 7069896
-    R_TRAIN = 64
+    R_TRAIN = 256
     R_TEST = 1
     BS = 64
     N_THREADS = 1
@@ -260,42 +310,41 @@ if __name__ == "__main__":
     cat2idx, idx2cat = make_category_tables(CATEGS)
 
     # Dataset and loader
-    loader = []
-    test_loader = []
-    go=0
 
-    for i in range(0, 1024):
-        # Scanning the metadata
-        meta_data, go = read_bson(TRAIN_BSON_FILE, R_TRAIN, with_categories=True, global_offset=go)
-        meta_data.category_id = np.array([cat2idx[ind] for ind in meta_data.category_id])
+    # Scanning the metadata
+    meta_data = read_bson(TRAIN_BSON_FILE, with_categories=True)
+    meta_data.category_id = np.array([cat2idx[ind] for ind in meta_data.category_id])
 
-        meta_data2, _ = read_bson(TRAIN_BSON_FILE, R_TEST, with_categories=True, global_offset=go)
-        meta_data2.category_id = np.array([cat2idx[ind] for ind in meta_data2.category_id])
+    temp = np.arange(N_TRAIN)
+    np.random.shuffle(temp)
 
-        # meta_data = meta_data.iloc[np.arange(500)]  # Remove this!!!
+    train_sample = temp[0:262144]
+    test_sample = temp[262144:262144+4096]
 
-        train_dataset = CdiscountDataset(TRAIN_BSON_FILE, meta_data, transf.ToTensor())
-        loader += [data_utils.DataLoader(train_dataset, batch_size=BS, num_workers=0, shuffle=True)]
 
-        test_dataset = CdiscountDataset(TRAIN_BSON_FILE, meta_data2, transf.ToTensor())
-        test_loader += [data_utils.DataLoader(test_dataset, batch_size=1, num_workers=0, shuffle=False)]
-        # Let's go fetch some data!
+    train_data = meta_data.iloc[train_sample]
+    test_data = meta_data.iloc[test_sample]
+
+    train_dataset = CdiscountDataset(TRAIN_BSON_FILE, train_data, transf.ToTensor())
+    loader = data_utils.DataLoader(train_dataset, batch_size=BS, num_workers=0, shuffle=True)
+
+    test_dataset = CdiscountDataset(TRAIN_BSON_FILE, test_data, transf.ToTensor())
+    test_loader = data_utils.DataLoader(test_dataset, batch_size=1, num_workers=0, shuffle=False)
+    # Let's go fetch some data!
 
     for epoch in range(EPOCH):
         pbar = tqdm(total=len(loader))
-        for loaderf in loader:
-            for i, (batch, target) in enumerate(loaderf):
-                # Convert torch tensor to Variable
-                images = Variable(batch.cuda())
-                labels = Variable(target.cuda())
+        for i, (batch, target) in enumerate(loader):
+            # Convert torch tensor to Variable
+            images = Variable(batch.cuda())
+            labels = Variable(target.cuda())
 
-                # Forward + Backward + Optimize
-                optimizer.zero_grad()  # zero the gradient buffer
-                outputs = net(images)
-                loss = criterion(outputs, labels)
-                loss.backward()
-                optimizer.step()
-
+            # Forward + Backward + Optimize
+            optimizer.zero_grad()  # zero the gradient buffer
+            outputs = net(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
             pbar.update()
         pbar.close()
 
@@ -303,15 +352,14 @@ if __name__ == "__main__":
         net.eval()
         correct = 0
         total = 0
-        for test_loaderf in test_loader:
-            for batch, target in test_loaderf:
-                images = Variable(batch).cuda()
-                outputs = net(images)
-                _, predicted = torch.max(outputs.data, 1)
-                total += target.size(0)
-                correct += (predicted.cpu() == target).sum()
+        for batch, target in test_loader:
+            images = Variable(batch).cuda()
+            outputs = net(images)
+            _, predicted = torch.max(outputs.data, 1)
+            total += target.size(0)
+            correct += (predicted.cpu() == target).sum()
         net.train()
-        print('%dth accuracy of the network on the %d test images: %f %%' % (epoch, R_TEST, (100.0 * correct / total)))
+        print('%dth accuracy of the network on the %d test images: %f %%' % (epoch, len(test_loader), (100.0 * correct / total)))
 
     # Save the Model
     torch.save(net.state_dict(), 'model.pkl')
