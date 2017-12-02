@@ -267,8 +267,8 @@ class Net(nn.Module):
         return out
 
 
-net = torch.nn.DataParallel(Net())
-net.load_state_dict(torch.load('model.pkl'))
+net = torch.nn.DataParallel(Net(), device_ids=[0,1])
+#net.load_state_dict(torch.load('model.pkl'))
 
 learning_rate=0.001
 
