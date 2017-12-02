@@ -127,10 +127,10 @@ class ResidualBlock(nn.Module):
         super(ResidualBlock, self).__init__()
         self.layer1 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1 + (pooling//3)),
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1 + (pooling//3), groups=in_channels),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, groups=out_channels),
             nn.BatchNorm2d(out_channels),
             nn.MaxPool2d(pooling, stride=stride),
         )
@@ -152,13 +152,13 @@ class ResidualBlock2(nn.Module):
         super(ResidualBlock2, self).__init__()
         self.layer1 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1, groups=channels),
             nn.BatchNorm2d(channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1, groups=channels),
             nn.BatchNorm2d(channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1, groups=channels),
             nn.BatchNorm2d(channels),
         )
 
@@ -175,40 +175,40 @@ class Net(nn.Module):
         self.layer1 = nn.Sequential(
             nn.Conv2d(3, 32, kernel_size=3, padding=1, stride=2),
             nn.BatchNorm2d(32),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
         )
 
         self.layer2 = self.residual(64, 128, 3)
         self.layer3 = self.residual(128, 256, 3)
-        self.layer4 = self.residual(256, 728, 3)
-        self.layer5 = self.residual2(728)
-        self.layer6 = self.residual2(728)
-        self.layer7 = self.residual2(728)
-        self.layer8 = self.residual2(728)
-        self.layer9 = self.residual2(728)
-        self.layer10 = self.residual2(728)
-        self.layer11 = self.residual2(728)
-        self.layer12 = self.residual2(728)
-        self.layer13 = self.residual(728, 1024, 3)
+        self.layer4 = self.residual(256, 768, 3)
+        self.layer5 = self.residual2(768)
+        self.layer6 = self.residual2(768)
+        self.layer7 = self.residual2(768)
+        self.layer8 = self.residual2(768)
+        self.layer9 = self.residual2(768)
+        self.layer10 = self.residual2(768)
+        self.layer11 = self.residual2(768)
+        self.layer12 = self.residual2(768)
+        self.layer13 = self.residual(768, 768, 3)
 
         self.layer14 = nn.Sequential(
-            nn.Conv2d(1024, 1536, kernel_size=3, padding=1),
+            nn.Conv2d(768, 1536, kernel_size=3, padding=1, groups=768),
             nn.BatchNorm2d(1536),
-            nn.ReLU(),
-            nn.Conv2d(1536, 2048, kernel_size=3, padding=1),
-            nn.BatchNorm2d(2048),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(1536, 1536, kernel_size=3, padding=1, groups=1536),
+            nn.BatchNorm2d(1536),
+            nn.ReLU(inplace=True),
             nn.AvgPool2d(6)
         )
 
         self.fc = nn.Sequential(
-            nn.Dropout(),
-            nn.Linear(2048, 5270),)
+            nn.Dropout(inplace=True),
+            nn.Linear(1536, 5270),)
 
-        self.test = nn.Sequential(
+        '''self.test = nn.Sequential(
             nn.Conv2d(3, 8, kernel_size=3, padding=1, stride=2),
             nn.BatchNorm2d(8),
             nn.ReLU(),
@@ -220,7 +220,7 @@ class Net(nn.Module):
             nn.Linear(50*50*16, 1024),
             nn.ReLU(),
             nn.Linear(1024,5270),
-        )
+        )'''
 
     def residual(self, ind, outd, pooling):
         layers = []
@@ -267,8 +267,8 @@ class Net(nn.Module):
         return out
 
 
-net = Net()
-net.cuda()
+net = torch.nn.DataParallel(Net()).cuda()
+net.load_state_dict(torch.load('model.pkl'))
 
 learning_rate=0.001
 
@@ -282,10 +282,8 @@ if __name__ == "__main__":
     CATEGS = 'D:/Download/category_names.csv'
     # Chenge this weh running on your machine
     N_TRAIN = 7069896
-    R_TRAIN = 256
-    R_TEST = 1
-    BS = 256
-    N_THREADS = 1
+    BS = 64
+    N_THREADS = 2
     EPOCH = 100
 
     # mapping the catigores into 0-5269 range
@@ -300,8 +298,8 @@ if __name__ == "__main__":
     temp = np.arange(N_TRAIN)
     np.random.shuffle(temp)
 
-    train_sample = temp[0:7000000]
-    test_sample = temp[7000000:7069896]
+    train_sample = temp[0:7060000]
+    test_sample = temp[7060000:7064096]
 
     train_data = meta_data.iloc[train_sample]
     test_data = meta_data.iloc[test_sample]
@@ -324,7 +322,7 @@ if __name__ == "__main__":
         transf.ToTensor(),
         transf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ]))
-    loader = data_utils.DataLoader(train_dataset, batch_size=BS, shuffle=True)
+    loader = data_utils.DataLoader(train_dataset, batch_size=BS, shuffle=True, pin_memory=True)
 
     test_dataset = CdiscountDataset(TRAIN_BSON_FILE, test_data, transf.Compose([
         transf.Scale(200),
@@ -334,7 +332,7 @@ if __name__ == "__main__":
         ]))
     test_loader = data_utils.DataLoader(test_dataset, batch_size=1, shuffle=False)
     # Let's go fetch some data!
-
+    torch.backends.cudnn.benchmark = True
     for epoch in range(EPOCH):
         pbar = tqdm(total=len(loader))
         for i, (batch, target) in enumerate(loader):
@@ -356,7 +354,7 @@ if __name__ == "__main__":
         correct = 0
         total = 0
         for batch, target in test_loader:
-            images = Variable(batch).cuda()
+            images = Variable(batch, volatile=True).cuda()
             outputs = net(images)
             _, predicted = torch.max(outputs.data, 1)
             total += target.size(0)
@@ -364,6 +362,6 @@ if __name__ == "__main__":
         net.train()
         print('%dth accuracy of the network on the %d test images: %f %%' % (epoch, len(test_loader), (100.0 * correct / total)))
 
-    # Save the Model
-    torch.save(net.state_dict(), 'model.pkl')
+        # Save the Model
+        torch.save(net.state_dict(), 'model.pkl')
 
