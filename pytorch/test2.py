@@ -267,7 +267,7 @@ class Net(nn.Module):
         return out
 
 
-net = torch.nn.DataParallel(Net()).cuda()
+net = torch.nn.DataParallel(Net())
 net.load_state_dict(torch.load('model.pkl'))
 
 learning_rate=0.001
@@ -337,7 +337,7 @@ if __name__ == "__main__":
         pbar = tqdm(total=len(loader))
         for i, (batch, target) in enumerate(loader):
             # Convert torch tensor to Variable
-            images = Variable(batch.cuda())
+            images = Variable(batch)
             labels = Variable(target.cuda())
 
             # Forward + Backward + Optimize
