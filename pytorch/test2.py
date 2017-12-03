@@ -126,7 +126,7 @@ class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=2, pooling=2):
         super(ResidualBlock, self).__init__()
         self.layer1 = nn.Sequential(
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1 + (pooling//3), groups=in_channels),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
@@ -151,7 +151,7 @@ class ResidualBlock2(nn.Module):
     def __init__(self, channels):
         super(ResidualBlock2, self).__init__()
         self.layer1 = nn.Sequential(
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Conv2d(channels, channels, kernel_size=3, padding=1, groups=channels),
             nn.BatchNorm2d(channels),
             nn.ReLU(inplace=True),
@@ -205,7 +205,7 @@ class Net(nn.Module):
         )
 
         self.fc = nn.Sequential(
-            nn.Dropout(inplace=True),
+            nn.Dropout(),
             nn.Linear(1536, 5270),)
 
         '''self.test = nn.Sequential(
@@ -267,7 +267,7 @@ class Net(nn.Module):
         return out
 
 
-net = torch.nn.DataParallel(Net(), device_ids=[0,1])
+net = torch.nn.DataParallel(Net()).cuda()
 #net.load_state_dict(torch.load('model.pkl'))
 
 learning_rate=0.001
@@ -277,12 +277,12 @@ criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(net.parameters(), weight_decay=1e-5)
 
 if __name__ == "__main__":
-    TRAIN_BSON_FILE = 'C:/test/train.bson'
-    TEST_BSON_FILE = 'C:/test/test.bson'
-    CATEGS = 'D:/Download/category_names.csv'
+    TRAIN_BSON_FILE = 'train.bson'
+    TEST_BSON_FILE = 'test.bson'
+    CATEGS = 'category_names.csv'
     # Chenge this weh running on your machine
     N_TRAIN = 7069896
-    BS = 64
+    BS = 128
     N_THREADS = 2
     EPOCH = 100
 
@@ -322,7 +322,7 @@ if __name__ == "__main__":
         transf.ToTensor(),
         transf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ]))
-    loader = data_utils.DataLoader(train_dataset, batch_size=BS, shuffle=True, pin_memory=True)
+    loader = data_utils.DataLoader(train_dataset, batch_size=BS, shuffle=True, num_workers=4)
 
     test_dataset = CdiscountDataset(TRAIN_BSON_FILE, test_data, transf.Compose([
         transf.Scale(200),
@@ -330,14 +330,14 @@ if __name__ == "__main__":
         transf.ToTensor(),
         transf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ]))
-    test_loader = data_utils.DataLoader(test_dataset, batch_size=1, shuffle=False)
+    test_loader = data_utils.DataLoader(test_dataset, batch_size=BS, shuffle=False)
     # Let's go fetch some data!
     torch.backends.cudnn.benchmark = True
     for epoch in range(EPOCH):
         pbar = tqdm(total=len(loader))
         for i, (batch, target) in enumerate(loader):
             # Convert torch tensor to Variable
-            images = Variable(batch)
+            images = Variable(batch.cuda())
             labels = Variable(target.cuda())
 
             # Forward + Backward + Optimize
